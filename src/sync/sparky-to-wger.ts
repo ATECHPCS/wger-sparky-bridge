@@ -35,8 +35,10 @@ export async function sparkyToWger(
     const checkIns = await sparky.getCheckInsRange(sinceStr, todayStr);
     for (const checkIn of checkIns) {
       if (checkIn.weight === undefined || checkIn.weight === null) continue;
-      const weight = safeNumber(checkIn.weight, `weight ${checkIn.entry_date}`);
+      let weight = safeNumber(checkIn.weight, `weight ${checkIn.entry_date}`);
       if (weight === null) { result.errors++; continue; }
+      // wger weight field is DecimalField(max_digits=5, decimal_places=2) — round to 2 dp
+      weight = Math.round(weight * 100) / 100;
       try {
         await wger.upsertWeightEntry(checkIn.entry_date, weight);
         result.weight++;
