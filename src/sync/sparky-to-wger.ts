@@ -35,13 +35,13 @@ export async function sparkyToWger(
     const checkIns = await sparky.getCheckInsRange(sinceStr, todayStr);
     for (const checkIn of checkIns) {
       if (checkIn.weight === undefined || checkIn.weight === null) continue;
-      const weight = safeNumber(checkIn.weight, `weight ${checkIn.date}`);
+      const weight = safeNumber(checkIn.weight, `weight ${checkIn.entry_date}`);
       if (weight === null) { result.errors++; continue; }
       try {
-        await wger.upsertWeightEntry(checkIn.date, weight);
+        await wger.upsertWeightEntry(checkIn.entry_date, weight);
         result.weight++;
       } catch (err) {
-        console.error(`[sparky→wger] weight upsert failed for ${checkIn.date}:`, sanitize(err));
+        console.error(`[sparky→wger] weight upsert failed for ${checkIn.entry_date}:`, sanitize(err));
         result.errors++;
       }
     }
@@ -62,12 +62,12 @@ export async function sparkyToWger(
     for (const sparkyCategory of sparkyCategories) {
       if (!sparkyCategory.id) continue;
 
-      let wgerCategoryId = wgerCategoryMap.get(categoryKey(sparkyCategory.name, sparkyCategory.unit));
+      let wgerCategoryId = wgerCategoryMap.get(categoryKey(sparkyCategory.name, sparkyCategory.measurement_type));
       if (wgerCategoryId === undefined) {
         try {
-          const created = await wger.createMeasurementCategory(sparkyCategory.name, sparkyCategory.unit);
+          const created = await wger.createMeasurementCategory(sparkyCategory.name, sparkyCategory.measurement_type);
           wgerCategoryId = created.id;
-          wgerCategoryMap.set(categoryKey(sparkyCategory.name, sparkyCategory.unit), wgerCategoryId);
+          wgerCategoryMap.set(categoryKey(sparkyCategory.name, sparkyCategory.measurement_type), wgerCategoryId);
         } catch (err) {
           console.error(`[sparky→wger] failed to create category ${sparkyCategory.name}:`, sanitize(err));
           result.errors++;
@@ -85,13 +85,14 @@ export async function sparkyToWger(
       }
 
       for (const entry of sparkyEntries) {
-        const value = safeNumber(entry.value, `category ${sparkyCategory.name} on ${entry.date}`);
+        const entryDate = entry.date.slice(0, 10);
+        const value = safeNumber(entry.value, `category ${sparkyCategory.name} on ${entryDate}`);
         if (value === null) { result.errors++; continue; }
         try {
-          await wger.upsertMeasurement(wgerCategoryId, entry.date, value);
+          await wger.upsertMeasurement(wgerCategoryId, entryDate, value);
           result.measurements++;
         } catch (err) {
-          console.error(`[sparky→wger] measurement upsert failed for ${sparkyCategory.name}/${entry.date}:`, sanitize(err));
+          console.error(`[sparky→wger] measurement upsert failed for ${sparkyCategory.name}/${entryDate}:`, sanitize(err));
           result.errors++;
         }
       }

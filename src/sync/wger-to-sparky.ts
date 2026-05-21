@@ -155,7 +155,7 @@ async function syncWeight(
       sparky.getCheckInsRange(sinceStr, todayStr),
     ]);
 
-    const sparkyDates = new Set(sparkyCheckIns.map((c) => c.date));
+    const sparkyDates = new Set(sparkyCheckIns.map((c) => c.entry_date));
 
     for (const entry of wgerEntries) {
       if (sparkyDates.has(entry.date)) continue;
@@ -164,7 +164,7 @@ async function syncWeight(
       if (weight === null) { result.errors++; continue; }
 
       try {
-        await sparky.upsertCheckIn({ date: entry.date, weight });
+        await sparky.upsertCheckIn({ entry_date: entry.date, weight });
         result.weight++;
       } catch (err) {
         console.error(`[wger→sparky] weight entry ${entry.date} failed:`, sanitize(err));
@@ -199,10 +199,7 @@ async function syncMeasurements(
 
       if (sparkyCategoryId === undefined) {
         try {
-          const created = await sparky.createCustomCategory({
-            name: wgerCategory.name,
-            unit: wgerCategory.unit,
-          });
+          const created = await sparky.createCustomCategory(wgerCategory.name, wgerCategory.unit);
           if (!created.id) {
             console.error(`[wger→sparky] Sparky returned no id for category ${wgerCategory.name}`);
             result.errors++;
@@ -230,7 +227,7 @@ async function syncMeasurements(
       let sparkyExisting: Set<string>;
       try {
         const existing = await sparky.getCustomEntriesRange(sparkyCategoryId, sinceStr, todayStr);
-        sparkyExisting = new Set(existing.map((e) => e.date));
+        sparkyExisting = new Set(existing.map((e) => e.date.slice(0, 10)));
       } catch {
         sparkyExisting = new Set();
       }
@@ -269,6 +266,6 @@ function buildSparkyCategoryMap(categories: SparkyCustomCategory[]): Map<string,
   return new Map(
     categories
       .filter((c): c is SparkyCustomCategory & { id: string } => typeof c.id === 'string')
-      .map((c) => [categoryKey(c.name, c.unit), c.id]),
+      .map((c) => [categoryKey(c.name, c.measurement_type), c.id]),
   );
 }

@@ -1,8 +1,8 @@
 import axios, { AxiosInstance } from 'axios';
 
 export interface SparkyCheckIn {
-  id?: number;
-  date: string; // YYYY-MM-DD
+  id?: string; // UUID
+  entry_date: string; // YYYY-MM-DD
   weight?: number;
   neck?: number;
   waist?: number;
@@ -15,14 +15,14 @@ export interface SparkyCheckIn {
 export interface SparkyCustomCategory {
   id?: string; // UUID
   name: string;
-  unit: string;
+  measurement_type: string; // unit label (e.g. "kcal", "m")
 }
 
 export interface SparkyCustomEntry {
   id?: string;
   category_id: string; // UUID
-  date: string; // YYYY-MM-DD
-  value: number;
+  date: string; // ISO datetime from API — take .slice(0,10) for YYYY-MM-DD
+  value: number | string; // API returns strings; use safeNumber() before arithmetic
 }
 
 export interface SparkyExercise {
@@ -59,7 +59,7 @@ export class SparkyClient {
 
   constructor(baseUrl: string, apiKey: string) {
     this.http = axios.create({
-      baseURL: baseUrl,
+      baseURL: `${baseUrl}/api`,
       headers: {
         // API key ≥64 chars with no dots is auto-detected as API key by Sparky's auth middleware
         Authorization: `Bearer ${apiKey}`,
@@ -87,10 +87,11 @@ export class SparkyClient {
     return res.data;
   }
 
-  async createCustomCategory(
-    category: Omit<SparkyCustomCategory, 'id'>,
-  ): Promise<SparkyCustomCategory> {
-    const res = await this.http.post<SparkyCustomCategory>('/measurements/custom-categories', category);
+  async createCustomCategory(name: string, unit: string): Promise<SparkyCustomCategory> {
+    const res = await this.http.post<SparkyCustomCategory>('/measurements/custom-categories', {
+      name,
+      measurement_type: unit,
+    });
     return res.data;
   }
 
