@@ -4,6 +4,7 @@ import { SparkyClient } from './clients/sparky.js';
 import { startScheduler } from './scheduler.js';
 import healthRouter from './routes/health.js';
 import statusRouter from './routes/status.js';
+import { createTriggerRouter } from './routes/trigger.js';
 
 function requireEnv(name: string): string {
   const val = process.env[name];
@@ -34,6 +35,7 @@ const app = express();
 app.use(express.json());
 app.use(healthRouter);
 app.use(statusRouter);
+app.use(createTriggerRouter(wger, sparky));
 
 app.listen(PORT, () => {
   console.log(`[server] listening on :${PORT}`);
