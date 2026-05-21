@@ -233,21 +233,22 @@ async function syncMeasurements(
       }
 
       for (const m of wgerMeasurements) {
-        if (sparkyExisting.has(m.date)) continue;
+        const mDate = m.date.slice(0, 10); // normalize ISO datetime to YYYY-MM-DD
+        if (sparkyExisting.has(mDate)) continue;
 
-        const value = safeNumber(m.value, `measurement ${wgerCategory.name}/${m.date}`);
+        const value = safeNumber(m.value, `measurement ${wgerCategory.name}/${mDate}`);
         if (value === null) { result.errors++; continue; }
 
         try {
           await sparky.upsertCustomEntry({
             category_id: sparkyCategoryId,
-            date: m.date,
+            date: mDate,
             value,
           });
-          sparkyExisting.add(m.date);
+          sparkyExisting.add(mDate);
           result.measurements++;
         } catch (err) {
-          console.error(`[wger→sparky] measurement ${wgerCategory.name}/${m.date} failed:`, sanitize(err));
+          console.error(`[wger→sparky] measurement ${wgerCategory.name}/${mDate} failed:`, sanitize(err));
           result.errors++;
         }
       }
