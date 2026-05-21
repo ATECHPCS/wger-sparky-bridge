@@ -78,20 +78,26 @@ export class WgerClient {
     try {
       await this.http.post('/api/v2/weightentry/', { date, weight });
     } catch (err: unknown) {
-      if (axios.isAxiosError(err) && err.response?.status === 400) {
-        const bodyStr = JSON.stringify(err.response.data).toLowerCase();
+      if (!axios.isAxiosError(err)) throw err;
+      const status = err.response?.status;
+      if (status === 400) {
+        const bodyStr = JSON.stringify(err.response?.data ?? '').toLowerCase();
+        // Non-duplicate 400 — rethrow with context
         if (!bodyStr.includes('already') && !bodyStr.includes('unique') && !bodyStr.includes('exists')) {
           throw new Error(`wger weight POST 400 (not duplicate): ${sanitizeAxiosError(err)}`);
         }
-        const existing = await this.http.get<{ results: WgerWeightEntry[] }>(
-          `/api/v2/weightentry/?format=json&date=${date}`,
-        );
-        const entry = existing.data.results[0];
-        if (entry) {
-          await this.http.patch(`/api/v2/weightentry/${entry.id}/`, { weight });
-        }
-      } else {
+      } else if (status !== 500) {
+        // wger can return 500 on duplicate — fall through to GET+PATCH
+        // Any other status is unexpected
         throw err;
+      }
+      // 400 duplicate or 500 — look up and PATCH existing entry
+      const existing = await this.http.get<{ results: WgerWeightEntry[] }>(
+        `/api/v2/weightentry/?format=json&date=${date}`,
+      );
+      const entry = existing.data.results[0];
+      if (entry) {
+        await this.http.patch(`/api/v2/weightentry/${entry.id}/`, { weight });
       }
     }
   }
