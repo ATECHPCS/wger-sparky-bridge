@@ -9,11 +9,9 @@ services:
       - "3333:3000"
     environment:
       WGER_URL: http://wger-nginx:80
-      WGER_USERNAME: ${WGER_USERNAME}
-      WGER_PASSWORD: ${WGER_PASSWORD}
+      WGER_API_TOKEN: ${WGER_API_TOKEN}
       SPARKY_URL: http://sparkyfitness-server:3010
       SPARKY_API_KEY: ${SPARKY_API_KEY}
-      SPARKY_USER_ID: ${SPARKY_USER_ID}
       SYNC_CRON: "0 * * * *"
       DATA_DIR: /data
     volumes:

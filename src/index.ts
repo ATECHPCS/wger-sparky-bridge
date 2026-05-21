@@ -21,16 +21,14 @@ function requirePort(): number {
 }
 
 const WGER_URL = requireEnv('WGER_URL');
-const WGER_USERNAME = requireEnv('WGER_USERNAME');
-const WGER_PASSWORD = requireEnv('WGER_PASSWORD');
+const WGER_API_TOKEN = requireEnv('WGER_API_TOKEN');
 const SPARKY_URL = requireEnv('SPARKY_URL');
 const SPARKY_API_KEY = requireEnv('SPARKY_API_KEY');
-const SPARKY_USER_ID = requireEnv('SPARKY_USER_ID');
 const SYNC_CRON = process.env.SYNC_CRON ?? '0 * * * *';
 const PORT = requirePort();
 
-const wger = new WgerClient(WGER_URL, WGER_USERNAME, WGER_PASSWORD);
-const sparky = new SparkyClient(SPARKY_URL, SPARKY_API_KEY, SPARKY_USER_ID);
+const wger = new WgerClient(WGER_URL, WGER_API_TOKEN);
+const sparky = new SparkyClient(SPARKY_URL, SPARKY_API_KEY);
 
 const app = express();
 app.use(express.json());
