@@ -1,0 +1,29 @@
+services:
+  wger-sparky-sync:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wger-sparky-sync
+    restart: unless-stopped
+    ports:
+      - "3333:3000"
+    environment:
+      WGER_URL: http://wger-nginx:80
+      WGER_USERNAME: ${WGER_USERNAME}
+      WGER_PASSWORD: ${WGER_PASSWORD}
+      SPARKY_URL: http://sparkyfitness-server:3010
+      SPARKY_API_KEY: ${SPARKY_API_KEY}
+      SPARKY_USER_ID: ${SPARKY_USER_ID}
+      SYNC_CRON: "0 * * * *"
+      DATA_DIR: /data
+    volumes:
+      - /opt/wger-sparky-sync/data:/data
+    networks:
+      - wger_default
+      - sparkyfitness_default
+
+networks:
+  wger_default:
+    external: true
+  sparkyfitness_default:
+    external: true
