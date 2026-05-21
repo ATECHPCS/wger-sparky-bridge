@@ -17,10 +17,13 @@ services:
       SYNC_CRON: "0 * * * *"
       DATA_DIR: /data
     volumes:
-      - /opt/wger-sparky-sync/data:/data
+      - sync-data:/data
     networks:
       - wger_default
       - sparkyfitness_default
+
+volumes:
+  sync-data:
 
 networks:
   wger_default:
