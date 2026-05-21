@@ -1,8 +1,6 @@
 services:
   wger-sparky-sync:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/atechpcs/wger-sparky-bridge:latest
     container_name: wger-sparky-sync
     restart: unless-stopped
     ports:
