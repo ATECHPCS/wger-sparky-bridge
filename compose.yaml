@@ -1,6 +1,15 @@
+name: wger-sparky-bridge
+
 services:
   wger-sparky-sync:
+    build:
+      # Build from this repo so the image always matches the deployed commit
+      # (no manual GHCR push / no CI). Requires GH_BUILD_TOKEN (private repo).
+      context: https://x-access-token:${GH_BUILD_TOKEN}@github.com/ATECHPCS/wger-sparky-bridge.git#main
+      dockerfile: Dockerfile
     image: ghcr.io/atechpcs/wger-sparky-bridge:latest
+    # Force a rebuild on deploy; otherwise Compose reuses the cached image.
+    pull_policy: build
     container_name: wger-sparky-sync
     restart: unless-stopped
     ports:

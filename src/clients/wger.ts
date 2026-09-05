@@ -107,11 +107,24 @@ export class WgerClient {
   }
 
   async createMeasurementCategory(name: string, unit: string): Promise<WgerMeasurementCategory> {
-    const res = await this.http.post<WgerMeasurementCategory>('/api/v2/measurement-category/', {
-      name,
-      unit,
-    });
-    return res.data;
+    // wger MeasurementCategory.unit is max_length 30; keep within bounds.
+    const safeUnit = (unit ?? '').slice(0, 30);
+    try {
+      const res = await this.http.post<WgerMeasurementCategory>('/api/v2/measurement-category/', {
+        name: name.slice(0, 100),
+        unit: safeUnit,
+      });
+      return res.data;
+    } catch (err: unknown) {
+      // A category with this name may already exist (wger 400s on duplicate, and
+      // our name|unit map can miss it when the unit differs). Reuse it by name.
+      if (axios.isAxiosError(err) && err.response?.status === 400) {
+        const cats = await this.getMeasurementCategories();
+        const existing = cats.find((c) => c.name.toLowerCase() === name.toLowerCase());
+        if (existing) return existing;
+      }
+      throw err;
+    }
   }
 
   async getMeasurements(since: Date, categoryId?: number): Promise<WgerMeasurement[]> {
@@ -122,8 +135,15 @@ export class WgerClient {
   }
 
   async upsertMeasurement(categoryId: number, date: string, value: number): Promise<void> {
+    // wger measurement.value is DecimalField(max_digits=8, decimal_places=2,
+    // min 0). Round to 2 dp and reject genuinely out-of-range values with a
+    // clear message instead of the opaque DRF "8 digits"/"2 decimals" errors.
+    const v = Math.round(value * 100) / 100;
+    if (!(v >= 0 && v <= 999999.99)) {
+      throw new Error(`wger measurement value out of range (0..999999.99): ${value}`);
+    }
     try {
-      await this.http.post('/api/v2/measurement/', { category: categoryId, date, value });
+      await this.http.post('/api/v2/measurement/', { category: categoryId, date, value: v });
     } catch (err: unknown) {
       if (axios.isAxiosError(err) && err.response?.status === 400) {
         const bodyStr = JSON.stringify(err.response.data).toLowerCase();
@@ -135,7 +155,7 @@ export class WgerClient {
         );
         const entry = existing.data.results.find((m) => m.date === date);
         if (entry) {
-          await this.http.patch(`/api/v2/measurement/${entry.id}/`, { value });
+          await this.http.patch(`/api/v2/measurement/${entry.id}/`, { value: v });
         }
       } else {
         throw err;

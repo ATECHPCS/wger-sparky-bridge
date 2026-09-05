@@ -64,12 +64,12 @@ export async function sparkyToWger(
     for (const sparkyCategory of sparkyCategories) {
       if (!sparkyCategory.id) continue;
 
-      let wgerCategoryId = wgerCategoryMap.get(categoryKey(sparkyCategory.name, sparkyCategory.measurement_type));
+      let wgerCategoryId = wgerCategoryMap.get(categoryKey(sparkyCategory.name));
       if (wgerCategoryId === undefined) {
         try {
           const created = await wger.createMeasurementCategory(sparkyCategory.name, sparkyCategory.measurement_type);
           wgerCategoryId = created.id;
-          wgerCategoryMap.set(categoryKey(sparkyCategory.name, sparkyCategory.measurement_type), wgerCategoryId);
+          wgerCategoryMap.set(categoryKey(sparkyCategory.name), wgerCategoryId);
         } catch (err) {
           console.error(`[sparky→wger] failed to create category ${sparkyCategory.name}:`, sanitize(err));
           result.errors++;
@@ -107,10 +107,18 @@ export async function sparkyToWger(
   return result;
 }
 
-function categoryKey(name: string, unit: string): string {
-  return `${name.toLowerCase()}|${unit.toLowerCase()}`;
+// Match categories by name only. Units are formatted differently between Sparky
+// and wger (e.g. 'lbs' vs 'lb'), so keying on name|unit missed existing
+// categories and tried to re-create duplicates (wger 400).
+function categoryKey(name: string): string {
+  return name.trim().toLowerCase();
 }
 
 function buildWgerCategoryMap(categories: WgerMeasurementCategory[]): Map<string, number> {
-  return new Map(categories.map((c) => [categoryKey(c.name, c.unit), c.id]));
+  const m = new Map<string, number>();
+  for (const c of categories) {
+    const k = categoryKey(c.name);
+    if (!m.has(k)) m.set(k, c.id);
+  }
+  return m;
 }
