@@ -39,6 +39,24 @@ export function noteFailure(t: FailTracker, key: string, dateIso: string, err: u
   console.error(`[fail] ${key} (attempt ${attempts}): ${m}`);
 }
 
+/**
+ * Record a NON-dated failure (a whole category create/fetch, not one record).
+ * It is retried and can go dead, but it never sets earliestFailure, so one bad
+ * category cannot pin the watermark back to the start of time and force the
+ * whole backlog to reprocess every run.
+ */
+export function noteSoftFailure(t: FailTracker, key: string, err: unknown): void {
+  const m = msg(err);
+  const attempts = bumpFailure(key, m);
+  if (attempts >= MAX_RETRIES) {
+    console.error(`[dead] ${key} skipped after ${attempts} attempts: ${m}`);
+    t.dead++;
+    return;
+  }
+  t.errors++;
+  console.error(`[softfail] ${key} (attempt ${attempts}): ${m}`);
+}
+
 /** Clear a record's failure history after it syncs successfully. */
 export function noteSuccess(key: string): void {
   clearFailure(key);

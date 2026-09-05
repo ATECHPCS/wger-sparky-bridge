@@ -1,6 +1,6 @@
 import { WgerClient, WgerMeasurementCategory } from '../clients/wger.js';
 import { SparkyClient } from '../clients/sparky.js';
-import { FailTracker, newFailTracker, noteFailure, noteSuccess } from './failures.js';
+import { FailTracker, newFailTracker, noteFailure, noteSoftFailure, noteSuccess } from './failures.js';
 
 export interface Phase1Result extends FailTracker {
   weight: number;
@@ -10,6 +10,10 @@ export interface Phase1Result extends FailTracker {
 // Sparky categories whose values are not scalar numbers (e.g. JSON time-series)
 // cannot be wger measurements; skip them entirely.
 const NON_NUMERIC_UNITS = new Set(['json']);
+
+// Body weight is synced via the dedicated weight-checkin path, not as a custom
+// measurement category (creating it as one is redundant and 400s on Sparky).
+const WEIGHT_CATEGORY_NAMES = new Set(['body weight', 'weight', 'bodyweight']);
 
 function safeNumber(value: unknown, label: string): number | null {
   const n = Number(value);
@@ -66,6 +70,7 @@ export async function sparkyToWger(
     for (const sparkyCategory of sparkyCategories) {
       if (!sparkyCategory.id) continue;
       if (NON_NUMERIC_UNITS.has((sparkyCategory.measurement_type || '').toLowerCase())) continue;
+      if (WEIGHT_CATEGORY_NAMES.has(categoryKey(sparkyCategory.name))) continue;
 
       let wgerCategoryId = wgerCategoryMap.get(categoryKey(sparkyCategory.name));
       if (wgerCategoryId === undefined) {
@@ -74,7 +79,7 @@ export async function sparkyToWger(
           wgerCategoryId = created.id;
           wgerCategoryMap.set(categoryKey(sparkyCategory.name), wgerCategoryId);
         } catch (err) {
-          noteFailure(result, `s2w:cat:${sparkyCategory.name}`, sinceStr, err);
+          noteSoftFailure(result, `s2w:cat:${sparkyCategory.name}`, err);
           continue;
         }
       }
@@ -83,7 +88,7 @@ export async function sparkyToWger(
       try {
         sparkyEntries = await sparky.getCustomEntriesRange(sparkyCategory.id, sinceStr, todayStr);
       } catch (err) {
-        noteFailure(result, `s2w:entries:${sparkyCategory.name}`, sinceStr, err);
+        noteSoftFailure(result, `s2w:entries:${sparkyCategory.name}`, err);
         continue;
       }
 

@@ -1,13 +1,17 @@
 import { WgerClient, WgerMeasurement } from '../clients/wger.js';
 import { SparkyClient, SparkyCustomCategory, SparkyExercise } from '../clients/sparky.js';
 import { isSynced, markSynced } from '../db/state.js';
-import { FailTracker, newFailTracker, noteFailure, noteSuccess } from './failures.js';
+import { FailTracker, newFailTracker, noteFailure, noteSoftFailure, noteSuccess } from './failures.js';
 
 export interface Phase2Result extends FailTracker {
   workouts: number;
   weight: number;
   measurements: number;
 }
+
+// Body weight is synced via the dedicated weight path, not as a custom measurement
+// category (Sparky 400s on creating one, and it would duplicate the check-ins).
+const WEIGHT_CATEGORY_NAMES = new Set(['body weight', 'weight', 'bodyweight']);
 
 function safeNumber(value: string | number | null | undefined, label: string): number | null {
   if (value === null || value === undefined) return null;
@@ -186,20 +190,22 @@ async function syncMeasurements(
     const sparkyCategoryMap = buildSparkyCategoryMap(sparkyCategories);
 
     for (const wgerCategory of wgerCategories) {
+      if (WEIGHT_CATEGORY_NAMES.has(categoryKey(wgerCategory.name))) continue;
+
       let sparkyCategoryId = sparkyCategoryMap.get(categoryKey(wgerCategory.name));
 
       if (sparkyCategoryId === undefined) {
         try {
           const created = await sparky.createCustomCategory(wgerCategory.name, wgerCategory.unit);
           if (!created.id) {
-            noteFailure(result, `w2s:cat:${wgerCategory.name}`, sinceStr,
+            noteSoftFailure(result, `w2s:cat:${wgerCategory.name}`,
               new Error('Sparky returned no id for created category'));
             continue;
           }
           sparkyCategoryId = created.id;
           sparkyCategoryMap.set(categoryKey(wgerCategory.name), sparkyCategoryId);
         } catch (err) {
-          noteFailure(result, `w2s:cat:${wgerCategory.name}`, sinceStr, err);
+          noteSoftFailure(result, `w2s:cat:${wgerCategory.name}`, err);
           continue;
         }
       }
@@ -208,7 +214,7 @@ async function syncMeasurements(
       try {
         wgerMeasurements = await wger.getMeasurements(since, wgerCategory.id);
       } catch (err) {
-        noteFailure(result, `w2s:meas-fetch:${wgerCategory.id}`, sinceStr, err);
+        noteSoftFailure(result, `w2s:meas-fetch:${wgerCategory.id}`, err);
         continue;
       }
 

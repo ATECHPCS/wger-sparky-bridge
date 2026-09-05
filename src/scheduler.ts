@@ -2,8 +2,7 @@ import cron from 'node-cron';
 import { WgerClient } from './clients/wger.js';
 import { SparkyClient } from './clients/sparky.js';
 import { runSync } from './sync/index.js';
-
-let running = false;
+import { tryAcquireRun, releaseRun } from './sync/lock.js';
 
 export function startScheduler(
   wger: WgerClient,
@@ -17,11 +16,11 @@ export function startScheduler(
   console.log(`[scheduler] cron: ${cronExpression}`);
 
   cron.schedule(cronExpression, async () => {
-    if (running) {
+    // Shared lock: skip if a scheduled OR manually-triggered run is in progress.
+    if (!tryAcquireRun()) {
       console.log('[scheduler] previous run still in progress, skipping');
       return;
     }
-    running = true;
     try {
       await runSync(wger, sparky);
     } catch (err) {
@@ -31,7 +30,7 @@ export function startScheduler(
         console.error('[scheduler] unhandled sync error:', String(err));
       }
     } finally {
-      running = false;
+      releaseRun();
     }
   });
 }
