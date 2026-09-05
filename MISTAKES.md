@@ -1,6 +1,7 @@
 # MISTAKES.md
 
 ## Enforced Rules (check every task)
+- **SYNC-01** — Never blind-POST a wger measurement. `measurements_measurement` has NO uniqueness on (category_id, date) unless external_id is set (only `unique_external_measurement` WHERE external_id IS NOT NULL), so a POST creates a NEW row every run. `upsertMeasurement` MUST GET `?category=&date=` first and PATCH the existing row, else POST. A blind POST here silently grew the table to 931,803 rows (~200x dupes, 320MB) and made phase2 never complete -> watermark stuck since May. (hits: 1)
 
 ## Patterns (promote at 3 hits)
 - Category matching between wger and Sparky must key on NAME only, never name|unit. Units are formatted differently across the two systems ('lb' vs 'lbs', 'ms', 'N/A'), so a name|unit key misses an existing category and tries to re-create a duplicate -> 400 (seen for "Body weight" in BOTH directions). Fixed in sparky-to-wger.ts and wger-to-sparky.ts. (hits: 2)
