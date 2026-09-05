@@ -195,7 +195,7 @@ async function syncMeasurements(
     const sparkyCategoryMap = buildSparkyCategoryMap(sparkyCategories);
 
     for (const wgerCategory of wgerCategories) {
-      let sparkyCategoryId = sparkyCategoryMap.get(categoryKey(wgerCategory.name, wgerCategory.unit));
+      let sparkyCategoryId = sparkyCategoryMap.get(categoryKey(wgerCategory.name));
 
       if (sparkyCategoryId === undefined) {
         try {
@@ -206,7 +206,7 @@ async function syncMeasurements(
             continue;
           }
           sparkyCategoryId = created.id;
-          sparkyCategoryMap.set(categoryKey(wgerCategory.name, wgerCategory.unit), sparkyCategoryId);
+          sparkyCategoryMap.set(categoryKey(wgerCategory.name), sparkyCategoryId);
         } catch (err) {
           console.error(`[wger→sparky] failed to create category ${wgerCategory.name}:`, sanitize(err));
           result.errors++;
@@ -259,14 +259,19 @@ async function syncMeasurements(
   }
 }
 
-function categoryKey(name: string, unit: string): string {
-  return `${name.toLowerCase()}|${unit.toLowerCase()}`;
+// Match categories by name only; units differ in formatting between wger and
+// Sparky (e.g. 'lb' vs 'lbs'), which made name|unit miss existing categories
+// and try to re-create duplicates (Sparky 400, e.g. "Body weight").
+function categoryKey(name: string): string {
+  return name.trim().toLowerCase();
 }
 
 function buildSparkyCategoryMap(categories: SparkyCustomCategory[]): Map<string, string> {
-  return new Map(
-    categories
-      .filter((c): c is SparkyCustomCategory & { id: string } => typeof c.id === 'string')
-      .map((c) => [categoryKey(c.name, c.measurement_type), c.id]),
-  );
+  const m = new Map<string, string>();
+  for (const c of categories) {
+    if (typeof c.id !== 'string') continue;
+    const k = categoryKey(c.name);
+    if (!m.has(k)) m.set(k, c.id);
+  }
+  return m;
 }
