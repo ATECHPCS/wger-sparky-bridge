@@ -7,10 +7,16 @@ export interface Phase1Result {
   errors: number;
 }
 
+// Sparky categories whose values are not scalar numbers (e.g. JSON time-series)
+// cannot be wger measurements; skip them entirely.
+const NON_NUMERIC_UNITS = new Set(['json']);
+
 function safeNumber(value: unknown, label: string): number | null {
   const n = Number(value);
   if (!Number.isFinite(n)) {
-    console.warn(`[sparky→wger] invalid numeric value for ${label}: ${JSON.stringify(value)}`);
+    // Truncate: some non-numeric values are large JSON blobs.
+    const preview = JSON.stringify(value).slice(0, 80);
+    console.warn(`[sparky→wger] non-numeric value for ${label}, skipping: ${preview}`);
     return null;
   }
   return n;
@@ -63,6 +69,7 @@ export async function sparkyToWger(
 
     for (const sparkyCategory of sparkyCategories) {
       if (!sparkyCategory.id) continue;
+      if (NON_NUMERIC_UNITS.has((sparkyCategory.measurement_type || '').toLowerCase())) continue;
 
       let wgerCategoryId = wgerCategoryMap.get(categoryKey(sparkyCategory.name));
       if (wgerCategoryId === undefined) {
@@ -89,7 +96,7 @@ export async function sparkyToWger(
       for (const entry of sparkyEntries) {
         const entryDate = entry.date.slice(0, 10);
         const value = safeNumber(entry.value, `category ${sparkyCategory.name} on ${entryDate}`);
-        if (value === null) { result.errors++; continue; }
+        if (value === null) { continue; }  // non-numeric -> skip, not an error
         try {
           await wger.upsertMeasurement(wgerCategoryId, entryDate, value);
           result.measurements++;
