@@ -1,12 +1,12 @@
 import { WgerClient, WgerMeasurement } from '../clients/wger.js';
 import { SparkyClient, SparkyCustomCategory, SparkyExercise } from '../clients/sparky.js';
 import { isSynced, markSynced } from '../db/state.js';
+import { FailTracker, newFailTracker, noteFailure, noteSuccess } from './failures.js';
 
-export interface Phase2Result {
+export interface Phase2Result extends FailTracker {
   workouts: number;
   weight: number;
   measurements: number;
-  errors: number;
 }
 
 function safeNumber(value: string | number | null | undefined, label: string): number | null {
@@ -54,12 +54,13 @@ export async function wgerToSparky(
   sparky: SparkyClient,
   since: Date,
 ): Promise<Phase2Result> {
-  const result: Phase2Result = { workouts: 0, weight: 0, measurements: 0, errors: 0 };
+  const result: Phase2Result = { workouts: 0, weight: 0, measurements: 0, ...newFailTracker() };
   const exerciseCache: ExerciseCache = new Map();
+  const sinceStr = since.toISOString().slice(0, 10);
 
-  await syncWorkouts(wger, sparky, since, result, exerciseCache);
-  await syncWeight(wger, sparky, since, result);
-  await syncMeasurements(wger, sparky, since, result);
+  await syncWorkouts(wger, sparky, since, sinceStr, result, exerciseCache);
+  await syncWeight(wger, sparky, since, sinceStr, result);
+  await syncMeasurements(wger, sparky, since, sinceStr, result);
 
   return result;
 }
@@ -68,6 +69,7 @@ async function syncWorkouts(
   wger: WgerClient,
   sparky: SparkyClient,
   since: Date,
+  sinceStr: string,
   result: Phase2Result,
   exerciseCache: ExerciseCache,
 ): Promise<void> {
@@ -79,12 +81,9 @@ async function syncWorkouts(
       try {
         logs = await wger.getWorkoutLogs(session.id);
       } catch (err) {
-        console.error(`[wger→sparky] failed to fetch logs for session ${session.id}:`, sanitize(err));
-        result.errors++;
+        noteFailure(result, `w2s:logs:${session.id}`, session.date, err);
         continue;
       }
-
-      let sessionErrors = 0;
 
       for (const log of logs) {
         const logKey = `log:${log.id}`;
@@ -94,8 +93,7 @@ async function syncWorkouts(
           const exerciseInfo = await wger.getExerciseInfo(log.exercise);
           if (!exerciseInfo) {
             console.warn(`[wger→sparky] exercise ${log.exercise} not found, skipping log ${log.id}`);
-            sessionErrors++;
-            continue;
+            continue; // unmappable data -> soft skip, does not hold the watermark
           }
 
           const sparkyExercise = await resolveExercise(
@@ -106,8 +104,7 @@ async function syncWorkouts(
           );
           if (!sparkyExercise) {
             console.warn(`[wger→sparky] could not resolve Sparky exercise for "${exerciseInfo.name}", skipping log ${log.id}`);
-            sessionErrors++;
-            continue;
+            continue; // unmappable data -> soft skip
           }
 
           const weight = safeNumber(log.weight, `log ${log.id} weight`);
@@ -123,20 +120,14 @@ async function syncWorkouts(
 
           markSynced('wger', logKey, 'workout');
           result.workouts++;
+          noteSuccess(`w2s:log:${log.id}`);
         } catch (err) {
-          console.error(`[wger→sparky] workout log ${log.id} failed:`, sanitize(err));
-          sessionErrors++;
-          result.errors++;
+          noteFailure(result, `w2s:log:${log.id}`, session.date, err);
         }
-      }
-
-      if (sessionErrors > 0) {
-        console.warn(`[wger→sparky] session ${session.id} had ${sessionErrors} log error(s)`);
       }
     }
   } catch (err) {
-    console.error('[wger→sparky] failed to fetch workout sessions:', sanitize(err));
-    result.errors++;
+    noteFailure(result, 'w2s:fetch:sessions', sinceStr, err);
   }
 }
 
@@ -144,10 +135,10 @@ async function syncWeight(
   wger: WgerClient,
   sparky: SparkyClient,
   since: Date,
+  sinceStr: string,
   result: Phase2Result,
 ): Promise<void> {
   try {
-    const sinceStr = since.toISOString().slice(0, 10);
     const todayStr = new Date().toISOString().slice(0, 10);
 
     const [wgerEntries, sparkyCheckIns] = await Promise.all([
@@ -161,19 +152,19 @@ async function syncWeight(
       if (sparkyDates.has(entry.date)) continue;
 
       const weight = safeNumber(entry.weight, `weight entry ${entry.date}`);
-      if (weight === null) { result.errors++; continue; }
+      if (weight === null) continue; // non-numeric -> skip, not an error
 
+      const key = `w2s:weight:${entry.date}`;
       try {
         await sparky.upsertCheckIn({ entry_date: entry.date, weight });
         result.weight++;
+        noteSuccess(key);
       } catch (err) {
-        console.error(`[wger→sparky] weight entry ${entry.date} failed:`, sanitize(err));
-        result.errors++;
+        noteFailure(result, key, entry.date, err);
       }
     }
   } catch (err) {
-    console.error('[wger→sparky] failed to sync weight:', sanitize(err));
-    result.errors++;
+    noteFailure(result, 'w2s:fetch:weight', sinceStr, err);
   }
 }
 
@@ -181,10 +172,10 @@ async function syncMeasurements(
   wger: WgerClient,
   sparky: SparkyClient,
   since: Date,
+  sinceStr: string,
   result: Phase2Result,
 ): Promise<void> {
   try {
-    const sinceStr = since.toISOString().slice(0, 10);
     const todayStr = new Date().toISOString().slice(0, 10);
 
     const [wgerCategories, sparkyCategories] = await Promise.all([
@@ -201,15 +192,14 @@ async function syncMeasurements(
         try {
           const created = await sparky.createCustomCategory(wgerCategory.name, wgerCategory.unit);
           if (!created.id) {
-            console.error(`[wger→sparky] Sparky returned no id for category ${wgerCategory.name}`);
-            result.errors++;
+            noteFailure(result, `w2s:cat:${wgerCategory.name}`, sinceStr,
+              new Error('Sparky returned no id for created category'));
             continue;
           }
           sparkyCategoryId = created.id;
           sparkyCategoryMap.set(categoryKey(wgerCategory.name), sparkyCategoryId);
         } catch (err) {
-          console.error(`[wger→sparky] failed to create category ${wgerCategory.name}:`, sanitize(err));
-          result.errors++;
+          noteFailure(result, `w2s:cat:${wgerCategory.name}`, sinceStr, err);
           continue;
         }
       }
@@ -218,8 +208,7 @@ async function syncMeasurements(
       try {
         wgerMeasurements = await wger.getMeasurements(since, wgerCategory.id);
       } catch (err) {
-        console.error(`[wger→sparky] failed to fetch measurements for category ${wgerCategory.id}:`, sanitize(err));
-        result.errors++;
+        noteFailure(result, `w2s:meas-fetch:${wgerCategory.id}`, sinceStr, err);
         continue;
       }
 
@@ -237,8 +226,9 @@ async function syncMeasurements(
         if (sparkyExisting.has(mDate)) continue;
 
         const value = safeNumber(m.value, `measurement ${wgerCategory.name}/${mDate}`);
-        if (value === null) { result.errors++; continue; }
+        if (value === null) continue; // non-numeric -> skip, not an error
 
+        const key = `w2s:meas:${wgerCategory.name}:${mDate}`;
         try {
           await sparky.upsertCustomEntry({
             category_id: sparkyCategoryId,
@@ -247,15 +237,14 @@ async function syncMeasurements(
           });
           sparkyExisting.add(mDate);
           result.measurements++;
+          noteSuccess(key);
         } catch (err) {
-          console.error(`[wger→sparky] measurement ${wgerCategory.name}/${mDate} failed:`, sanitize(err));
-          result.errors++;
+          noteFailure(result, key, mDate, err);
         }
       }
     }
   } catch (err) {
-    console.error('[wger→sparky] failed to sync measurements:', sanitize(err));
-    result.errors++;
+    noteFailure(result, 'w2s:fetch:measurements', sinceStr, err);
   }
 }
 

@@ -62,6 +62,8 @@ export class WgerClient {
     // wger uses "Token <key>" (DRF token auth) — no JWT refresh needed
     this.http = axios.create({
       baseURL: baseUrl,
+      // Cap each request so a hung upstream call cannot wedge a whole sync run.
+      timeout: Number(process.env.REQUEST_TIMEOUT_MS ?? 30000),
       headers: { Authorization: `Token ${apiToken}` },
     });
   }

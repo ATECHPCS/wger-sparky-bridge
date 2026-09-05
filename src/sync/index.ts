@@ -26,22 +26,34 @@ export async function runSync(wger: WgerClient, sparky: SparkyClient): Promise<S
   console.log(`[sync] starting run, since=${since.toISOString()}`);
 
   const phase1 = await sparkyToWger(wger, sparky, since);
-  console.log(`[sync] phase1 done: weight=${phase1.weight} measurements=${phase1.measurements} errors=${phase1.errors}`);
+  console.log(`[sync] phase1 done: weight=${phase1.weight} measurements=${phase1.measurements} errors=${phase1.errors} dead=${phase1.dead}`);
 
   const phase2 = await wgerToSparky(wger, sparky, since);
-  console.log(`[sync] phase2 done: workouts=${phase2.workouts} weight=${phase2.weight} measurements=${phase2.measurements} errors=${phase2.errors}`);
+  console.log(`[sync] phase2 done: workouts=${phase2.workouts} weight=${phase2.weight} measurements=${phase2.measurements} errors=${phase2.errors} dead=${phase2.dead}`);
 
   const completedAt = new Date();
   const totalErrors = phase1.errors + phase2.errors;
 
-  // Only advance the watermark when both phases completed without errors.
-  // Failed records are older than the new watermark and would be skipped forever otherwise.
-  const watermarkAdvanced = totalErrors === 0;
-  if (watermarkAdvanced) {
-    setLastSyncTs(completedAt);
+  // Advance the watermark to just before the OLDEST still-failing record, so
+  // already-synced records are never reprocessed but the failing tail retries
+  // next run. With no live failures, advance fully. Records that have exceeded
+  // MAX_RETRIES are "dead" and do not hold the watermark back (permanently-bad
+  // data can't wedge the sync into reprocessing the whole backlog forever).
+  const earliestFailure = [phase1.earliestFailure, phase2.earliestFailure]
+    .filter((d): d is string => d !== null)
+    .sort()[0];
+
+  let newWatermark: Date;
+  if (earliestFailure) {
+    const candidate = new Date(`${earliestFailure}T00:00:00.000Z`);
+    // never move the watermark backwards
+    newWatermark = candidate < since ? since : candidate;
+    console.warn(`[sync] ${totalErrors} live error(s) — watermark set to earliest unresolved failure ${earliestFailure}`);
   } else {
-    console.warn(`[sync] ${totalErrors} error(s) — watermark NOT advanced, will retry next run`);
+    newWatermark = completedAt;
   }
+  const watermarkAdvanced = earliestFailure === undefined && newWatermark > since;
+  setLastSyncTs(newWatermark);
 
   lastResult = {
     startedAt,

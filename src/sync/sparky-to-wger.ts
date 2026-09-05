@@ -1,10 +1,10 @@
 import { WgerClient, WgerMeasurementCategory } from '../clients/wger.js';
 import { SparkyClient } from '../clients/sparky.js';
+import { FailTracker, newFailTracker, noteFailure, noteSuccess } from './failures.js';
 
-export interface Phase1Result {
+export interface Phase1Result extends FailTracker {
   weight: number;
   measurements: number;
-  errors: number;
 }
 
 // Sparky categories whose values are not scalar numbers (e.g. JSON time-series)
@@ -22,16 +22,12 @@ function safeNumber(value: unknown, label: string): number | null {
   return n;
 }
 
-function sanitize(err: unknown): string {
-  return err instanceof Error ? `${err.constructor.name}: ${err.message}` : String(err);
-}
-
 export async function sparkyToWger(
   wger: WgerClient,
   sparky: SparkyClient,
   since: Date,
 ): Promise<Phase1Result> {
-  const result: Phase1Result = { weight: 0, measurements: 0, errors: 0 };
+  const result: Phase1Result = { weight: 0, measurements: 0, ...newFailTracker() };
 
   const sinceStr = since.toISOString().slice(0, 10);
   const todayStr = new Date().toISOString().slice(0, 10);
@@ -42,20 +38,20 @@ export async function sparkyToWger(
     for (const checkIn of checkIns) {
       if (checkIn.weight === undefined || checkIn.weight === null) continue;
       let weight = safeNumber(checkIn.weight, `weight ${checkIn.entry_date}`);
-      if (weight === null) { result.errors++; continue; }
+      if (weight === null) continue; // non-numeric -> skip, not an error
       // wger weight field is DecimalField(max_digits=5, decimal_places=2) — round to 2 dp
       weight = Math.round(weight * 100) / 100;
+      const key = `s2w:weight:${checkIn.entry_date}`;
       try {
         await wger.upsertWeightEntry(checkIn.entry_date, weight);
         result.weight++;
+        noteSuccess(key);
       } catch (err) {
-        console.error(`[sparky→wger] weight upsert failed for ${checkIn.entry_date}:`, sanitize(err));
-        result.errors++;
+        noteFailure(result, key, checkIn.entry_date, err);
       }
     }
   } catch (err) {
-    console.error('[sparky→wger] failed to fetch weight check-ins:', sanitize(err));
-    result.errors++;
+    noteFailure(result, 's2w:fetch:checkins', sinceStr, err);
   }
 
   // Push custom measurements from Sparky → wger
@@ -78,8 +74,7 @@ export async function sparkyToWger(
           wgerCategoryId = created.id;
           wgerCategoryMap.set(categoryKey(sparkyCategory.name), wgerCategoryId);
         } catch (err) {
-          console.error(`[sparky→wger] failed to create category ${sparkyCategory.name}:`, sanitize(err));
-          result.errors++;
+          noteFailure(result, `s2w:cat:${sparkyCategory.name}`, sinceStr, err);
           continue;
         }
       }
@@ -88,27 +83,26 @@ export async function sparkyToWger(
       try {
         sparkyEntries = await sparky.getCustomEntriesRange(sparkyCategory.id, sinceStr, todayStr);
       } catch (err) {
-        console.error(`[sparky→wger] failed to fetch entries for category ${sparkyCategory.name}:`, sanitize(err));
-        result.errors++;
+        noteFailure(result, `s2w:entries:${sparkyCategory.name}`, sinceStr, err);
         continue;
       }
 
       for (const entry of sparkyEntries) {
         const entryDate = entry.date.slice(0, 10);
         const value = safeNumber(entry.value, `category ${sparkyCategory.name} on ${entryDate}`);
-        if (value === null) { continue; }  // non-numeric -> skip, not an error
+        if (value === null) continue; // non-numeric -> skip, not an error
+        const key = `s2w:meas:${sparkyCategory.name}:${entryDate}`;
         try {
           await wger.upsertMeasurement(wgerCategoryId, entryDate, value);
           result.measurements++;
+          noteSuccess(key);
         } catch (err) {
-          console.error(`[sparky→wger] measurement upsert failed for ${sparkyCategory.name}/${entryDate}:`, sanitize(err));
-          result.errors++;
+          noteFailure(result, key, entryDate, err);
         }
       }
     }
   } catch (err) {
-    console.error('[sparky→wger] failed to sync measurements:', sanitize(err));
-    result.errors++;
+    noteFailure(result, 's2w:fetch:categories', sinceStr, err);
   }
 
   return result;

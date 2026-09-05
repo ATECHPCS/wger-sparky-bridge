@@ -60,6 +60,8 @@ export class SparkyClient {
   constructor(baseUrl: string, apiKey: string) {
     this.http = axios.create({
       baseURL: `${baseUrl}/api`,
+      // Cap each request so a hung upstream call cannot wedge a whole sync run.
+      timeout: Number(process.env.REQUEST_TIMEOUT_MS ?? 30000),
       headers: {
         // API key ≥64 chars with no dots is auto-detected as API key by Sparky's auth middleware
         Authorization: `Bearer ${apiKey}`,
