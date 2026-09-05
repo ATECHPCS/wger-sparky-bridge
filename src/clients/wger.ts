@@ -136,33 +136,27 @@ export class WgerClient {
     return this.paginate<WgerMeasurement>('/api/v2/measurement/', qs);
   }
 
-  async upsertMeasurement(categoryId: number, date: string, value: number): Promise<void> {
+  async upsertMeasurement(categoryId: number | string, date: string, value: number): Promise<void> {
     // wger measurement.value is DecimalField(max_digits=8, decimal_places=2,
-    // min 0). Round to 2 dp and reject genuinely out-of-range values with a
-    // clear message instead of the opaque DRF "8 digits"/"2 decimals" errors.
+    // min 0). Round to 2 dp and reject genuinely out-of-range values.
     const v = Math.round(value * 100) / 100;
     if (!(v >= 0 && v <= 999999.99)) {
       throw new Error(`wger measurement value out of range (0..999999.99): ${value}`);
     }
-    try {
-      await this.http.post('/api/v2/measurement/', { category: categoryId, date, value: v });
-    } catch (err: unknown) {
-      if (axios.isAxiosError(err) && err.response?.status === 400) {
-        const bodyStr = JSON.stringify(err.response.data).toLowerCase();
-        if (!bodyStr.includes('already') && !bodyStr.includes('unique') && !bodyStr.includes('exists')) {
-          throw new Error(`wger measurement POST 400 (not duplicate): ${sanitizeAxiosError(err)}`);
-        }
-        const existing = await this.http.get<{ results: WgerMeasurement[] }>(
-          `/api/v2/measurement/?format=json&category=${categoryId}`,
-        );
-        const entry = existing.data.results.find((m) => m.date === date);
-        if (entry) {
-          await this.http.patch(`/api/v2/measurement/${entry.id}/`, { value: v });
-        }
-      } else {
-        throw err;
+    // The measurement endpoint has NO uniqueness on (category, date) for rows
+    // without an external_id, so a blind POST creates a duplicate every run.
+    // Check-then-write: PATCH the existing row for this category+date, else POST.
+    const existing = await this.http.get<{ results: WgerMeasurement[] }>(
+      `/api/v2/measurement/?format=json&category=${categoryId}&date=${date}&limit=1`,
+    );
+    const entry = existing.data.results[0];
+    if (entry) {
+      if (Number(entry.value) !== v) {
+        await this.http.patch(`/api/v2/measurement/${entry.id}/`, { value: v });
       }
+      return;
     }
+    await this.http.post('/api/v2/measurement/', { category: categoryId, date, value: v });
   }
 
   async getWorkoutSessions(since: Date): Promise<WgerWorkoutSession[]> {
