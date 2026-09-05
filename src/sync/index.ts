@@ -48,7 +48,7 @@ export async function runSync(wger: WgerClient, sparky: SparkyClient): Promise<S
     const candidate = new Date(`${earliestFailure}T00:00:00.000Z`);
     // never move the watermark backwards
     newWatermark = candidate < since ? since : candidate;
-    console.warn(`[sync] ${totalErrors} live error(s) — watermark set to earliest unresolved failure ${earliestFailure}`);
+    console.warn(`[sync] ${totalErrors} live error(s); watermark set to earliest unresolved failure ${earliestFailure}`);
   } else {
     newWatermark = completedAt;
   }
