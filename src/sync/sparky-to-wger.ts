@@ -15,6 +15,17 @@ const NON_NUMERIC_UNITS = new Set(['json']);
 // measurement category (creating it as one is redundant and 400s on Sparky).
 const WEIGHT_CATEGORY_NAMES = new Set(['body weight', 'weight', 'bodyweight']);
 
+// Optional allowlist: when MEASUREMENT_ALLOWLIST is set (comma-separated category
+// names), ONLY those Sparky categories are pushed into wger. This keeps the flood
+// of Garmin/Apple micro-metrics (Body Battery, gait, stress, ...) out of wger -
+// they crash the wger app's PowerSync load and are noise for a lifting app.
+const MEASUREMENT_ALLOWLIST = new Set(
+  (process.env.MEASUREMENT_ALLOWLIST || '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
+);
+
 function safeNumber(value: unknown, label: string): number | null {
   const n = Number(value);
   if (!Number.isFinite(n)) {
@@ -71,6 +82,7 @@ export async function sparkyToWger(
       if (!sparkyCategory.id) continue;
       if (NON_NUMERIC_UNITS.has((sparkyCategory.measurement_type || '').toLowerCase())) continue;
       if (WEIGHT_CATEGORY_NAMES.has(categoryKey(sparkyCategory.name))) continue;
+      if (MEASUREMENT_ALLOWLIST.size > 0 && !MEASUREMENT_ALLOWLIST.has(categoryKey(sparkyCategory.name))) continue;
 
       let wgerCategoryId = wgerCategoryMap.get(categoryKey(sparkyCategory.name));
       if (wgerCategoryId === undefined) {

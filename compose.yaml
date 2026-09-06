@@ -20,6 +20,8 @@ services:
       SPARKY_URL: http://sparkyfitness-server:3010
       SPARKY_API_KEY: ${SPARKY_API_KEY}
       SYNC_CRON: "0 * * * *"
+      # Only push these Sparky measurement categories into wger (keep Garmin/Apple noise out).
+      MEASUREMENT_ALLOWLIST: "Body fat,VO2 Max,resting_heart_rate"
       DATA_DIR: /data
     volumes:
       - sync-data:/data
