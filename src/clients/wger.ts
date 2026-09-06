@@ -77,31 +77,20 @@ export class WgerClient {
   }
 
   async upsertWeightEntry(date: string, weight: number): Promise<void> {
-    try {
-      await this.http.post('/api/v2/weightentry/', { date, weight });
-    } catch (err: unknown) {
-      if (!axios.isAxiosError(err)) throw err;
-      const status = err.response?.status;
-      if (status === 400) {
-        const bodyStr = JSON.stringify(err.response?.data ?? '').toLowerCase();
-        // Non-duplicate 400 — rethrow with context
-        if (!bodyStr.includes('already') && !bodyStr.includes('unique') && !bodyStr.includes('exists')) {
-          throw new Error(`wger weight POST 400 (not duplicate): ${sanitizeAxiosError(err)}`);
-        }
-      } else if (status !== 500) {
-        // wger can return 500 on duplicate — fall through to GET+PATCH
-        // Any other status is unexpected
-        throw err;
-      }
-      // 400 duplicate or 500 — look up and PATCH existing entry
-      const existing = await this.http.get<{ results: WgerWeightEntry[] }>(
-        `/api/v2/weightentry/?format=json&date=${date}`,
-      );
-      const entry = existing.data.results[0];
-      if (entry) {
+    // In wger 2.6 the weight log is the "Body weight" measurement category, which
+    // has NO uniqueness on date, so a blind POST creates a DUPLICATE every run.
+    // Check-then-write: PATCH the existing entry for this date, else POST.
+    const existing = await this.http.get<{ results: WgerWeightEntry[] }>(
+      `/api/v2/weightentry/?format=json&date=${date}&limit=1`,
+    );
+    const entry = existing.data.results[0];
+    if (entry) {
+      if (Number(entry.weight) !== weight) {
         await this.http.patch(`/api/v2/weightentry/${entry.id}/`, { weight });
       }
+      return;
     }
+    await this.http.post('/api/v2/weightentry/', { date, weight });
   }
 
   async getMeasurementCategories(): Promise<WgerMeasurementCategory[]> {
