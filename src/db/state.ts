@@ -38,7 +38,112 @@ function migrate(db: Database.Database): void {
       last_error TEXT,
       updated_at TEXT NOT NULL
     );
+
+    -- Weight check-ins rejected by the anomaly guard (see sync/weight-guard.ts).
+    -- Quarantined dates are never pushed and never re-alert.
+    CREATE TABLE IF NOT EXISTS weight_quarantine (
+      date        TEXT PRIMARY KEY,
+      value       REAL NOT NULL,
+      reason      TEXT NOT NULL,
+      created_at  TEXT NOT NULL
+    );
+
+    -- All-time best estimated 1RM per exercise, for PR detection.
+    CREATE TABLE IF NOT EXISTS pr_best (
+      exercise_id INTEGER PRIMARY KEY,
+      best_1rm    REAL NOT NULL,
+      best_weight REAL NOT NULL,
+      best_reps   INTEGER NOT NULL,
+      date        TEXT NOT NULL,
+      updated_at  TEXT NOT NULL
+    );
+
+    -- One row per detected PR event, used to build the weekly digest.
+    CREATE TABLE IF NOT EXISTS pr_event (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      exercise_id   INTEGER NOT NULL,
+      exercise_name TEXT NOT NULL,
+      weight        REAL NOT NULL,
+      reps          INTEGER NOT NULL,
+      est_1rm       REAL NOT NULL,
+      prev_1rm      REAL NOT NULL,
+      date          TEXT NOT NULL,
+      created_at    TEXT NOT NULL
+    );
   `);
+}
+
+// Weight anomaly quarantine ----------------------------------------------
+
+export function isWeightQuarantined(date: string): boolean {
+  return (
+    getDb().prepare('SELECT 1 FROM weight_quarantine WHERE date = ?').get(date) !== undefined
+  );
+}
+
+/** Record a rejected weight. Returns true only if this date was newly added
+ * (so the caller alerts exactly once per anomalous date). */
+export function quarantineWeight(date: string, value: number, reason: string): boolean {
+  const res = getDb()
+    .prepare(
+      'INSERT OR IGNORE INTO weight_quarantine (date, value, reason, created_at) VALUES (?, ?, ?, ?)',
+    )
+    .run(date, value, reason, new Date().toISOString());
+  return res.changes > 0;
+}
+
+// PR tracking ------------------------------------------------------------
+
+export interface PrBest {
+  exercise_id: number;
+  best_1rm: number;
+  best_weight: number;
+  best_reps: number;
+  date: string;
+}
+
+export function getPrBest(exerciseId: number): PrBest | undefined {
+  return getDb().prepare('SELECT * FROM pr_best WHERE exercise_id = ?').get(exerciseId) as
+    | PrBest
+    | undefined;
+}
+
+export function setPrBest(b: PrBest): void {
+  getDb()
+    .prepare(
+      `INSERT INTO pr_best (exercise_id, best_1rm, best_weight, best_reps, date, updated_at)
+       VALUES (@exercise_id, @best_1rm, @best_weight, @best_reps, @date, @updated_at)
+       ON CONFLICT(exercise_id) DO UPDATE SET
+         best_1rm=@best_1rm, best_weight=@best_weight, best_reps=@best_reps,
+         date=@date, updated_at=@updated_at`,
+    )
+    .run({ ...b, updated_at: new Date().toISOString() });
+}
+
+export interface PrEvent {
+  exercise_id: number;
+  exercise_name: string;
+  weight: number;
+  reps: number;
+  est_1rm: number;
+  prev_1rm: number;
+  date: string;
+}
+
+export function recordPrEvent(e: PrEvent): void {
+  getDb()
+    .prepare(
+      `INSERT INTO pr_event
+        (exercise_id, exercise_name, weight, reps, est_1rm, prev_1rm, date, created_at)
+       VALUES (@exercise_id, @exercise_name, @weight, @reps, @est_1rm, @prev_1rm, @date, @created_at)`,
+    )
+    .run({ ...e, created_at: new Date().toISOString() });
+}
+
+export function getRecentPrEvents(sinceIso: string): PrEvent[] {
+  return getDb()
+    .prepare('SELECT * FROM pr_event WHERE date >= ? ORDER BY date DESC')
+    .all(sinceIso) as PrEvent[];
 }
 
 // Per-record failure tracking so a permanently-bad record can be retried a

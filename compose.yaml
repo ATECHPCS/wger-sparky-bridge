@@ -24,6 +24,12 @@ services:
       # Sparky/Apple Health weight is kg; wger profile is lb -> convert on sync.
       SPARKY_WEIGHT_KG_TO_LB: "true"
       MEASUREMENT_ALLOWLIST: "Body fat,VO2 Max,resting_heart_rate"
+      # Telegram notifications (weight-anomaly alerts, PR nudges, weekly digest).
+      # No-op if unset. Chat/token supplied via the Komodo stack environment.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      # Weekly digest: Sunday 18:00 (container TZ). PR + weight-guard tunables use defaults.
+      DIGEST_CRON: "0 18 * * 0"
       DATA_DIR: /data
     volumes:
       - sync-data:/data

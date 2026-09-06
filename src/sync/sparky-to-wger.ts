@@ -1,9 +1,13 @@
 import { WgerClient, WgerMeasurementCategory } from '../clients/wger.js';
 import { SparkyClient } from '../clients/sparky.js';
 import { FailTracker, newFailTracker, noteFailure, noteSoftFailure, noteSuccess } from './failures.js';
+import { checkWeight } from './weight-guard.js';
+import { isWeightQuarantined, quarantineWeight } from '../db/state.js';
+import { sendTelegram } from '../notify/telegram.js';
 
 export interface Phase1Result extends FailTracker {
   weight: number;
+  weightRejected: number; // check-ins quarantined by the anomaly guard
   measurements: number;
 }
 
@@ -49,7 +53,7 @@ export async function sparkyToWger(
   sparky: SparkyClient,
   since: Date,
 ): Promise<Phase1Result> {
-  const result: Phase1Result = { weight: 0, measurements: 0, ...newFailTracker() };
+  const result: Phase1Result = { weight: 0, weightRejected: 0, measurements: 0, ...newFailTracker() };
 
   const sinceStr = since.toISOString().slice(0, 10);
   const todayStr = new Date().toISOString().slice(0, 10);
@@ -57,6 +61,19 @@ export async function sparkyToWger(
   // Push weight check-ins from Sparky → wger (Sparky is master)
   try {
     const checkIns = await sparky.getCheckInsRange(sinceStr, todayStr);
+
+    // Trailing reference weights (already in wger's stored unit) for the anomaly
+    // guard. Pull a wide window so the median is stable; grow it as we accept.
+    const refWindow = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+    let refs: number[] = [];
+    try {
+      refs = (await wger.getWeightEntries(refWindow))
+        .map((e) => Number(e.weight))
+        .filter((n) => Number.isFinite(n));
+    } catch (err) {
+      console.warn('[sparky→wger] could not load reference weights for guard:', String(err));
+    }
+
     for (const checkIn of checkIns) {
       if (checkIn.weight === undefined || checkIn.weight === null) continue;
       let weight = safeNumber(checkIn.weight, `weight ${checkIn.entry_date}`);
@@ -66,9 +83,29 @@ export async function sparkyToWger(
       if (KG_TO_LB_ENABLED) weight = weight * KG_TO_LB;
       // wger weight field is DecimalField(max_digits=5, decimal_places=2) — round to 2 dp
       weight = Math.round(weight * 100) / 100;
+
+      // Anomaly guard: never push (and never re-alert on) a quarantined date.
+      if (isWeightQuarantined(checkIn.entry_date)) {
+        result.weightRejected++;
+        continue;
+      }
+      const verdict = checkWeight(weight, refs);
+      if (!verdict.ok) {
+        result.weightRejected++;
+        const firstTime = quarantineWeight(checkIn.entry_date, weight, verdict.reason ?? 'anomaly');
+        console.warn(`[guard] weight ${checkIn.entry_date}=${weight} rejected: ${verdict.reason}`);
+        if (firstTime) {
+          await sendTelegram(
+            `⚠️ <b>Weight check-in ignored</b>\n${checkIn.entry_date}: <b>${weight}</b>\nReason: ${verdict.reason}\n\nNot written to wger. If this is really yours, add it manually in the app.`,
+          );
+        }
+        continue;
+      }
+
       const key = `s2w:weight:${checkIn.entry_date}`;
       try {
         await wger.upsertWeightEntry(checkIn.entry_date, weight);
+        refs.push(weight); // accepted value feeds the running median
         result.weight++;
         noteSuccess(key);
       } catch (err) {

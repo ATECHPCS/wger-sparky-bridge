@@ -16,9 +16,11 @@ router.get('/sync/status', (_req, res) => {
     last_run_duration_ms: last.durationMs,
     next_run: null,
     watermark_advanced: last.watermarkAdvanced,
+    prs_detected: last.prsDetected,
     last_run_result: {
       sparky_to_wger: {
         weight: last.sparkyToWger.weight,
+        weight_rejected: last.sparkyToWger.weightRejected,
         measurements: last.sparkyToWger.measurements,
         errors: last.sparkyToWger.errors,
       },

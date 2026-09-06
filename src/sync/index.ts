@@ -3,6 +3,7 @@ import { SparkyClient } from '../clients/sparky.js';
 import { getLastSyncTs, setLastSyncTs } from '../db/state.js';
 import { sparkyToWger, Phase1Result } from './sparky-to-wger.js';
 import { wgerToSparky, Phase2Result } from './wger-to-sparky.js';
+import { detectPRs } from '../pr/detect.js';
 
 export interface SyncResult {
   startedAt: Date;
@@ -10,6 +11,7 @@ export interface SyncResult {
   durationMs: number;
   sparkyToWger: Phase1Result;
   wgerToSparky: Phase2Result;
+  prsDetected: number;
   watermarkAdvanced: boolean;
 }
 
@@ -30,6 +32,16 @@ export async function runSync(wger: WgerClient, sparky: SparkyClient): Promise<S
 
   const phase2 = await wgerToSparky(wger, sparky, since);
   console.log(`[sync] phase2 done: workouts=${phase2.workouts} weight=${phase2.weight} measurements=${phase2.measurements} errors=${phase2.errors} dead=${phase2.dead}`);
+
+  // PR detection is best-effort: it must never break the sync or the watermark.
+  let prsDetected = 0;
+  try {
+    const pr = await detectPRs(wger, since);
+    prsDetected = pr.detected;
+    console.log(`[sync] pr detection done: detected=${prsDetected}`);
+  } catch (err) {
+    console.error('[sync] pr detection failed (ignored):', err instanceof Error ? err.message : String(err));
+  }
 
   const completedAt = new Date();
   const totalErrors = phase1.errors + phase2.errors;
@@ -61,6 +73,7 @@ export async function runSync(wger: WgerClient, sparky: SparkyClient): Promise<S
     durationMs: completedAt.getTime() - startedAt.getTime(),
     sparkyToWger: phase1,
     wgerToSparky: phase2,
+    prsDetected,
     watermarkAdvanced,
   };
 
