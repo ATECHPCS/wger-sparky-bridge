@@ -28,8 +28,9 @@ services:
       # No-op if unset. Chat/token supplied via the Komodo stack environment.
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
-      # Weekly digest: Sunday 18:00 (container TZ). PR + weight-guard tunables use defaults.
-      DIGEST_CRON: "0 18 * * 0"
+      # Weekly digest: Sunday 18:05 (container TZ) — a few minutes past the
+      # top-of-hour sync so PR detection finishes first. Tunables use defaults.
+      DIGEST_CRON: "5 18 * * 0"
       DATA_DIR: /data
     volumes:
       - sync-data:/data
