@@ -2,6 +2,7 @@ import { WgerClient, WgerMeasurement } from '../clients/wger.js';
 import { SparkyClient, SparkyCustomCategory, SparkyExercise } from '../clients/sparky.js';
 import { isSynced, markSynced } from '../db/state.js';
 import { FailTracker, newFailTracker, noteFailure, noteSoftFailure, noteSuccess } from './failures.js';
+import { KG_TO_LB, KG_TO_LB_ENABLED } from './sparky-to-wger.js';
 
 export interface Phase2Result extends FailTracker {
   workouts: number;
@@ -155,8 +156,10 @@ async function syncWeight(
     for (const entry of wgerEntries) {
       if (sparkyDates.has(entry.date)) continue;
 
-      const weight = safeNumber(entry.weight, `weight entry ${entry.date}`);
+      let weight = safeNumber(entry.weight, `weight entry ${entry.date}`);
       if (weight === null) continue; // non-numeric -> skip, not an error
+      // wger stores lb here; Sparky stores kg. Convert back on the reverse push.
+      if (KG_TO_LB_ENABLED) weight = Math.round((weight / KG_TO_LB) * 100) / 100;
 
       const key = `w2s:weight:${entry.date}`;
       try {

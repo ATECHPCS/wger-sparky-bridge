@@ -21,6 +21,8 @@ services:
       SPARKY_API_KEY: ${SPARKY_API_KEY}
       SYNC_CRON: "0 * * * *"
       # Only push these Sparky measurement categories into wger (keep Garmin/Apple noise out).
+      # Sparky/Apple Health weight is kg; wger profile is lb -> convert on sync.
+      SPARKY_WEIGHT_KG_TO_LB: "true"
       MEASUREMENT_ALLOWLIST: "Body fat,VO2 Max,resting_heart_rate"
       DATA_DIR: /data
     volumes:

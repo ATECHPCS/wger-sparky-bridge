@@ -15,6 +15,13 @@ const NON_NUMERIC_UNITS = new Set(['json']);
 // measurement category (creating it as one is redundant and 400s on Sparky).
 const WEIGHT_CATEGORY_NAMES = new Set(['body weight', 'weight', 'bodyweight']);
 
+// Sparky stores body weight in kg; the wger profile here is lb. When
+// SPARKY_WEIGHT_KG_TO_LB=true, convert kg->lb on push (and lb->kg on the
+// reverse pull in wger-to-sparky) so the stored number matches the lb display.
+export const KG_TO_LB = 2.2046226218;
+export const KG_TO_LB_ENABLED =
+  (process.env.SPARKY_WEIGHT_KG_TO_LB || '').trim().toLowerCase() === 'true';
+
 // Optional allowlist: when MEASUREMENT_ALLOWLIST is set (comma-separated category
 // names), ONLY those Sparky categories are pushed into wger. This keeps the flood
 // of Garmin/Apple micro-metrics (Body Battery, gait, stress, ...) out of wger -
@@ -54,6 +61,9 @@ export async function sparkyToWger(
       if (checkIn.weight === undefined || checkIn.weight === null) continue;
       let weight = safeNumber(checkIn.weight, `weight ${checkIn.entry_date}`);
       if (weight === null) continue; // non-numeric -> skip, not an error
+      // Sparky/Apple Health store mass in kg; wger's profile is lb. Convert so
+      // the number matches the display unit (env SPARKY_WEIGHT_KG_TO_LB=true).
+      if (KG_TO_LB_ENABLED) weight = weight * KG_TO_LB;
       // wger weight field is DecimalField(max_digits=5, decimal_places=2) — round to 2 dp
       weight = Math.round(weight * 100) / 100;
       const key = `s2w:weight:${checkIn.entry_date}`;
