@@ -3,7 +3,7 @@ import { SparkyClient } from '../clients/sparky.js';
 import { FailTracker, newFailTracker, noteFailure, noteSoftFailure, noteSuccess } from './failures.js';
 import { checkWeight } from './weight-guard.js';
 import { isWeightQuarantined, quarantineWeight } from '../db/state.js';
-import { sendTelegram } from '../notify/telegram.js';
+import { sendTelegram, escapeHtml } from '../notify/telegram.js';
 
 export interface Phase1Result extends FailTracker {
   weight: number;
@@ -60,7 +60,9 @@ export async function sparkyToWger(
 
   // Push weight check-ins from Sparky → wger (Sparky is master)
   try {
-    const checkIns = await sparky.getCheckInsRange(sinceStr, todayStr);
+    const checkIns = (await sparky.getCheckInsRange(sinceStr, todayStr)).sort((a, b) =>
+      a.entry_date.localeCompare(b.entry_date),
+    );
 
     // Trailing reference weights (already in wger's stored unit) for the anomaly
     // guard. Pull a wide window so the median is stable; grow it as we accept.
@@ -96,7 +98,7 @@ export async function sparkyToWger(
         console.warn(`[guard] weight ${checkIn.entry_date}=${weight} rejected: ${verdict.reason}`);
         if (firstTime) {
           await sendTelegram(
-            `⚠️ <b>Weight check-in ignored</b>\n${checkIn.entry_date}: <b>${weight}</b>\nReason: ${verdict.reason}\n\nNot written to wger. If this is really yours, add it manually in the app.`,
+            `⚠️ <b>Weight check-in ignored</b>\n${checkIn.entry_date}: <b>${weight}</b>\nReason: ${escapeHtml(verdict.reason ?? 'anomaly')}\n\nNot written to wger. If this is really yours, add it manually in the app.`,
           );
         }
         continue;

@@ -1,6 +1,6 @@
 import { WgerClient } from '../clients/wger.js';
 import { getRecentPrEvents } from '../db/state.js';
-import { sendTelegram, telegramEnabled } from '../notify/telegram.js';
+import { sendTelegram, telegramEnabled, escapeHtml } from '../notify/telegram.js';
 import { KG_TO_LB_ENABLED } from '../sync/sparky-to-wger.js';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -13,15 +13,27 @@ function iso(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Entry whose date is closest to `target`, from date-sorted entries. */
-function nearest(entries: { date: string; weight: string }[], target: string): number | null {
-  if (entries.length === 0) return null;
+/**
+ * Weight of the entry closest to `target`, excluding `excludeDate` (the latest
+ * entry — comparing today to itself is meaningless) and any entry more than
+ * `toleranceDays` from the target (so a lone recent entry reports "unavailable"
+ * instead of a bogus 0.0 delta).
+ */
+function nearest(
+  entries: { date: string; weight: string }[],
+  target: string,
+  excludeDate: string,
+  toleranceDays: number,
+): number | null {
   let best: { diff: number; w: number } | null = null;
   const t = new Date(target).getTime();
+  const maxDiff = toleranceDays * DAY;
   for (const e of entries) {
+    if (e.date.slice(0, 10) === excludeDate) continue;
     const w = Number(e.weight);
     if (!Number.isFinite(w)) continue;
     const diff = Math.abs(new Date(e.date).getTime() - t);
+    if (diff > maxDiff) continue;
     if (best === null || diff < best.diff) best = { diff, w };
   }
   return best?.w ?? null;
@@ -41,12 +53,14 @@ export async function buildWeeklyDigest(wger: WgerClient): Promise<string> {
       a.date.localeCompare(b.date),
     );
     if (entries.length > 0) {
-      const latest = Number(entries[entries.length - 1].weight);
-      const w7 = nearest(entries, iso(daysAgo(7)));
-      const w30 = nearest(entries, iso(daysAgo(30)));
+      const latestEntry = entries[entries.length - 1];
+      const latest = Number(latestEntry.weight);
+      const latestDate = latestEntry.date.slice(0, 10);
+      const w7 = nearest(entries, iso(daysAgo(7)), latestDate, 10);
+      const w30 = nearest(entries, iso(daysAgo(30)), latestDate, 20);
       lines.push(`⚖️ Weight: <b>${latest.toFixed(1)} ${UNIT}</b>`);
-      if (w7 !== null) lines.push(`   7-day: ${fmtDelta(latest - w7)}`);
-      if (w30 !== null) lines.push(`   30-day: ${fmtDelta(latest - w30)}`);
+      lines.push(w7 !== null ? `   7-day: ${fmtDelta(latest - w7)}` : '   7-day: n/a');
+      lines.push(w30 !== null ? `   30-day: ${fmtDelta(latest - w30)}` : '   30-day: n/a');
     } else {
       lines.push('⚖️ Weight: no entries in the last 35 days');
     }
@@ -80,7 +94,7 @@ export async function buildWeeklyDigest(wger: WgerClient): Promise<string> {
   if (prs.length > 0) {
     lines.push(`🏆 <b>${prs.length} new PR${prs.length > 1 ? 's' : ''} this week</b>`);
     for (const p of prs.slice(0, 5)) {
-      lines.push(`   ${p.exercise_name}: ${p.weight} × ${p.reps} (1RM ${Math.round(p.est_1rm)})`);
+      lines.push(`   ${escapeHtml(p.exercise_name)}: ${p.weight} × ${p.reps} (1RM ${Math.round(p.est_1rm)})`);
     }
   } else {
     lines.push('🏆 No new PRs this week');

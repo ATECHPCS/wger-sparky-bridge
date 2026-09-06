@@ -4,6 +4,7 @@ import { SparkyClient } from './clients/sparky.js';
 import { runSync } from './sync/index.js';
 import { tryAcquireRun, releaseRun } from './sync/lock.js';
 import { sendWeeklyDigest } from './digest/weekly.js';
+import { telegramEnabled } from './notify/telegram.js';
 
 export function startScheduler(
   wger: WgerClient,
@@ -37,14 +38,19 @@ export function startScheduler(
 }
 
 export function startDigestScheduler(wger: WgerClient, cronExpression: string): void {
+  // The weekly digest is an optional convenience: a bad DIGEST_CRON must not
+  // take the whole bridge down, so log and skip rather than throw.
   if (!cron.validate(cronExpression)) {
-    throw new Error(`Invalid DIGEST_CRON expression: ${cronExpression}`);
+    console.error(`[scheduler] invalid DIGEST_CRON "${cronExpression}"; weekly digest disabled`);
+    return;
   }
   console.log(`[scheduler] digest cron: ${cronExpression}`);
   cron.schedule(cronExpression, async () => {
     try {
       const sent = await sendWeeklyDigest(wger);
-      console.log(`[scheduler] weekly digest ${sent ? 'sent' : 'skipped (Telegram off)'}`);
+      if (sent) console.log('[scheduler] weekly digest sent');
+      else if (!telegramEnabled()) console.log('[scheduler] weekly digest skipped (Telegram off)');
+      else console.warn('[scheduler] weekly digest send FAILED (Telegram error)');
     } catch (err) {
       console.error('[scheduler] digest error:', err instanceof Error ? err.message : String(err));
     }

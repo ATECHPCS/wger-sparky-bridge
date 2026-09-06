@@ -59,8 +59,11 @@ function migrate(db: Database.Database): void {
     );
 
     -- One row per detected PR event, used to build the weekly digest.
+    -- log_id is the wger workout-log id, UNIQUE so a retry after a partial
+    -- write can never duplicate an event.
     CREATE TABLE IF NOT EXISTS pr_event (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      log_id        INTEGER,
       exercise_id   INTEGER NOT NULL,
       exercise_name TEXT NOT NULL,
       weight        REAL NOT NULL,
@@ -71,6 +74,21 @@ function migrate(db: Database.Database): void {
       created_at    TEXT NOT NULL
     );
   `);
+
+  // Idempotent upgrade for installs created before log_id existed.
+  try {
+    db.exec('ALTER TABLE pr_event ADD COLUMN log_id INTEGER');
+  } catch {
+    /* column already present */
+  }
+  db.exec(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_pr_event_log ON pr_event(log_id) WHERE log_id IS NOT NULL',
+  );
+}
+
+/** Run `fn` inside a single SQLite transaction (all-or-nothing). */
+export function transaction<T>(fn: () => T): T {
+  return getDb().transaction(fn)();
 }
 
 // Weight anomaly quarantine ----------------------------------------------
@@ -121,6 +139,7 @@ export function setPrBest(b: PrBest): void {
 }
 
 export interface PrEvent {
+  log_id: number;
   exercise_id: number;
   exercise_name: string;
   weight: number;
@@ -130,12 +149,14 @@ export interface PrEvent {
   date: string;
 }
 
+/** Insert a PR event. INSERT OR IGNORE on the unique log_id makes it safe to
+ * call again after a crashed run without duplicating the event. */
 export function recordPrEvent(e: PrEvent): void {
   getDb()
     .prepare(
-      `INSERT INTO pr_event
-        (exercise_id, exercise_name, weight, reps, est_1rm, prev_1rm, date, created_at)
-       VALUES (@exercise_id, @exercise_name, @weight, @reps, @est_1rm, @prev_1rm, @date, @created_at)`,
+      `INSERT OR IGNORE INTO pr_event
+        (log_id, exercise_id, exercise_name, weight, reps, est_1rm, prev_1rm, date, created_at)
+       VALUES (@log_id, @exercise_id, @exercise_name, @weight, @reps, @est_1rm, @prev_1rm, @date, @created_at)`,
     )
     .run({ ...e, created_at: new Date().toISOString() });
 }

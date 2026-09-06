@@ -10,6 +10,13 @@ export function telegramEnabled(): boolean {
   return BOT_TOKEN.length > 0 && CHAT_ID.length > 0;
 }
 
+/** Escape text interpolated into an HTML-parse-mode message. Without this a
+ * value containing &, <, or > (e.g. an exercise name) makes Telegram reject
+ * the whole message. */
+export function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 /**
  * Send a Telegram message. Never throws — a notification failure must not
  * break a sync run. Returns true if the message was accepted.

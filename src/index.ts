@@ -27,7 +27,9 @@ const WGER_API_TOKEN = requireEnv('WGER_API_TOKEN');
 const SPARKY_URL = requireEnv('SPARKY_URL');
 const SPARKY_API_KEY = requireEnv('SPARKY_API_KEY');
 const SYNC_CRON = process.env.SYNC_CRON ?? '0 * * * *';
-const DIGEST_CRON = process.env.DIGEST_CRON ?? '0 18 * * 0'; // Sun 18:00
+// Sun 18:05 — a few minutes past the top-of-hour sync so that run's PR
+// detection has finished before the digest reads pr_event.
+const DIGEST_CRON = process.env.DIGEST_CRON ?? '5 18 * * 0';
 const PORT = requirePort();
 
 const wger = new WgerClient(WGER_URL, WGER_API_TOKEN);
@@ -42,8 +44,14 @@ app.use(createDigestRouter(wger));
 
 app.listen(PORT, () => {
   console.log(`[server] listening on :${PORT}`);
-  startScheduler(wger, sparky, SYNC_CRON);
-  console.log(`[server] sync scheduler started (${SYNC_CRON})`);
-  startDigestScheduler(wger, DIGEST_CRON);
+  try {
+    startScheduler(wger, sparky, SYNC_CRON);
+    console.log(`[server] sync scheduler started (${SYNC_CRON})`);
+  } catch (err) {
+    // A bad SYNC_CRON is a fatal misconfiguration (sync is the core job).
+    console.error('[server] fatal:', err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
+  startDigestScheduler(wger, DIGEST_CRON); // non-fatal; logs and skips if invalid
   console.log(`[server] digest scheduler started (${DIGEST_CRON})`);
 });
