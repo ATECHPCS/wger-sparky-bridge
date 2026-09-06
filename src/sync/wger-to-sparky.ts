@@ -10,9 +10,19 @@ export interface Phase2Result extends FailTracker {
   measurements: number;
 }
 
-// Body weight is synced via the dedicated weight path, not as a custom measurement
-// category (Sparky 400s on creating one, and it would duplicate the check-ins).
+// Categories Sparky stores as NATIVE check-in fields, not custom categories.
+// Pushing these back as custom categories 400s (Sparky already owns the name)
+// and would duplicate data — they originate in Sparky and flow Sparky→wger in
+// phase 1, so the reverse direction skips them. Body weight uses the dedicated
+// weight path; body fat is Sparky's body_fat_percentage field.
 const WEIGHT_CATEGORY_NAMES = new Set(['body weight', 'weight', 'bodyweight']);
+const NATIVE_CHECKIN_CATEGORY_NAMES = new Set([
+  ...WEIGHT_CATEGORY_NAMES,
+  'body fat',
+  'bodyfat',
+  'body fat percentage',
+  'body_fat_percentage',
+]);
 
 function safeNumber(value: string | number | null | undefined, label: string): number | null {
   if (value === null || value === undefined) return null;
@@ -193,7 +203,7 @@ async function syncMeasurements(
     const sparkyCategoryMap = buildSparkyCategoryMap(sparkyCategories);
 
     for (const wgerCategory of wgerCategories) {
-      if (WEIGHT_CATEGORY_NAMES.has(categoryKey(wgerCategory.name))) continue;
+      if (NATIVE_CHECKIN_CATEGORY_NAMES.has(categoryKey(wgerCategory.name))) continue;
 
       let sparkyCategoryId = sparkyCategoryMap.get(categoryKey(wgerCategory.name));
 
