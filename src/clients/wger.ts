@@ -6,25 +6,42 @@ export interface WgerWeightEntry {
   weight: string; // decimal string
 }
 
+// wger 2.6 shapes: UUID ids, `datetime_start` on sessions, and
+// `repetitions`/`repetitions_unit` on logs (decimal strings on the wire,
+// parsed to numbers here).
 export interface WgerWorkoutSession {
-  id: number;
-  workout: number;
-  date: string;
+  id: string;
+  routine: number | null;
+  day: number | null;
+  datetime_start: string;
+  datetime_end: string | null;
   notes: string;
   impression: string;
-  time_start: string | null;
-  time_end: string | null;
 }
 
 export interface WgerWorkoutLog {
-  id: number;
+  id: string;
   exercise: number;
-  workout: number;
-  workoutsession: number;
-  reps: number | null;
+  session: string;
+  repetitions: number | null;
+  repetitions_unit: number; // 1 = Repetitions
   weight: string | null;
   weight_unit: number;
-  repetition_unit: number;
+  date: string;
+}
+
+interface RawWorkoutSession extends Omit<WgerWorkoutSession, 'datetime_start'> {
+  datetime_start: string | null;
+}
+
+interface RawWorkoutLog {
+  id: string;
+  exercise: number;
+  session: string;
+  repetitions: string | null;
+  repetitions_unit: number;
+  weight: string | null;
+  weight_unit: number;
   date: string;
 }
 
@@ -149,18 +166,25 @@ export class WgerClient {
   }
 
   async getWorkoutSessions(since: Date): Promise<WgerWorkoutSession[]> {
+    // wger silently ignores unknown filters (e.g. the pre-2.6 `date__gte`),
+    // which returns every session, so filter on the real field.
     const sinceDate = since.toISOString().slice(0, 10);
-    return this.paginate<WgerWorkoutSession>(
+    const raw = await this.paginate<RawWorkoutSession>(
       '/api/v2/workoutsession/',
-      `?format=json&ordering=date&date__gte=${sinceDate}`,
+      `?format=json&ordering=datetime_start&datetime_start__gte=${sinceDate}`,
     );
+    return raw.filter((s): s is WgerWorkoutSession => s.datetime_start !== null);
   }
 
-  async getWorkoutLogs(sessionId: number): Promise<WgerWorkoutLog[]> {
-    return this.paginate<WgerWorkoutLog>(
+  async getWorkoutLogs(sessionId: string): Promise<WgerWorkoutLog[]> {
+    const raw = await this.paginate<RawWorkoutLog>(
       '/api/v2/workoutlog/',
-      `?format=json&workoutsession=${sessionId}`,
+      `?format=json&session=${encodeURIComponent(sessionId)}`,
     );
+    return raw.map((l) => {
+      const reps = l.repetitions === null ? null : Number(l.repetitions);
+      return { ...l, repetitions: reps !== null && Number.isFinite(reps) ? reps : null };
+    });
   }
 
   async getExerciseInfo(exerciseId: number): Promise<WgerExercise | null> {
@@ -168,7 +192,7 @@ export class WgerClient {
       const res = await this.http.get<{
         translations: { name: string; language: number }[];
         category: { name: string };
-      }>(`/api/v2/exercise/${exerciseId}/?format=json`);
+      }>(`/api/v2/exerciseinfo/${exerciseId}/?format=json`); // names live on exerciseinfo in 2.6
       const translations = res.data.translations ?? [];
       const eng = translations.find((t) => t.language === 2) ?? translations[0];
       if (!eng) return null;

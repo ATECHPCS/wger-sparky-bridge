@@ -139,7 +139,7 @@ export function setPrBest(b: PrBest): void {
 }
 
 export interface PrEvent {
-  log_id: number;
+  log_id: string;
   exercise_id: number;
   exercise_name: string;
   weight: number;

@@ -77,7 +77,7 @@ export async function buildWeeklyDigest(wger: WgerClient): Promise<string> {
     let count30 = 0;
     const cut7 = iso(daysAgo(7));
     for (const s of sessions) {
-      const d = s.date.slice(0, 10);
+      const d = s.datetime_start.slice(0, 10);
       count30++;
       if (d >= cut7) in7.add(d);
     }

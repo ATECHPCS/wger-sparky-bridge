@@ -31,7 +31,7 @@ export interface PrDetectResult {
 // the pre-run baseline, so a session with several improving sets yields one
 // event and one alert (not a burst), regardless of log ordering.
 interface Pending {
-  log_id: number;
+  log_id: string;
   exercise_id: number;
   weight: number;
   reps: number;
@@ -54,7 +54,7 @@ export async function detectPRs(wger: WgerClient, since: Date): Promise<PrDetect
     return result;
   }
   // Deterministic: oldest sessions first so baselines seed before improvements.
-  sessions = [...sessions].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+  sessions = [...sessions].sort((a, b) => a.datetime_start.localeCompare(b.datetime_start) || a.id.localeCompare(b.id));
 
   // Running best per exercise (seeded from DB, updated as we go) and the one
   // pending PR per exercise.
@@ -76,17 +76,21 @@ export async function detectPRs(wger: WgerClient, since: Date): Promise<PrDetect
       console.warn(`[pr] could not fetch logs for session ${session.id}:`, String(err));
       continue;
     }
-    logs = [...logs].sort((a, b) => a.id - b.id); // deterministic order
-    const date = session.date.slice(0, 10);
+    logs = [...logs].sort((a, b) => a.id.localeCompare(b.id)); // deterministic order
+    const date = session.datetime_start.slice(0, 10);
 
     for (const log of logs) {
       const dedupKey = `log:${log.id}`;
       if (isSynced('wger', dedupKey, 'pr')) continue;
 
       const weight = Number(log.weight);
-      const reps = Number(log.reps);
+      const reps = Number(log.repetitions);
       // Only strength sets with both a load and reps are PR-comparable.
-      if (!(Number.isFinite(weight) && weight > 0 && Number.isFinite(reps) && reps >= 1)) {
+      // Timed holds (seconds) etc. are not reps, so skip non-Repetitions units.
+      if (
+        log.repetitions_unit !== 1 ||
+        !(Number.isFinite(weight) && weight > 0 && Number.isFinite(reps) && reps >= 1)
+      ) {
         markSynced('wger', dedupKey, 'pr');
         continue;
       }
