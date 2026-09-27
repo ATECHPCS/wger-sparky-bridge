@@ -32,6 +32,8 @@ export interface SparkyExercise {
 }
 
 export interface SparkySet {
+  set_number: number; // NOT NULL in Sparky >= 1.6
+  set_type?: string; // Sparky's own sets use 'Working Set'
   reps?: number;
   weight?: number;
   duration?: number;
