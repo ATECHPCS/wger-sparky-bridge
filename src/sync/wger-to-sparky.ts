@@ -96,7 +96,7 @@ async function syncWorkouts(
       try {
         logs = await wger.getWorkoutLogs(session.id);
       } catch (err) {
-        noteFailure(result, `w2s:logs:${session.id}`, session.date, err);
+        noteFailure(result, `w2s:logs:${session.id}`, session.datetime_start, err);
         continue;
       }
 
@@ -126,9 +126,9 @@ async function syncWorkouts(
 
           await sparky.createExerciseEntry({
             exercise_id: sparkyExercise.id,
-            entry_date: session.date,
-            sets: log.reps !== null || weight !== null
-              ? [{ reps: log.reps ?? undefined, weight: weight ?? undefined }]
+            entry_date: session.datetime_start.slice(0, 10), // local YYYY-MM-DD
+            sets: log.repetitions !== null || weight !== null
+              ? [{ reps: log.repetitions ?? undefined, weight: weight ?? undefined }]
               : undefined,
             notes: session.notes || undefined,
           });
@@ -137,7 +137,7 @@ async function syncWorkouts(
           result.workouts++;
           noteSuccess(`w2s:log:${log.id}`);
         } catch (err) {
-          noteFailure(result, `w2s:log:${log.id}`, session.date, err);
+          noteFailure(result, `w2s:log:${log.id}`, session.datetime_start, err);
         }
       }
     }
