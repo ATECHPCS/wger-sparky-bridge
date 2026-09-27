@@ -46,6 +46,7 @@ async function resolveExercise(
   name: string,
   category: string,
   cache: ExerciseCache,
+  wgerExerciseId?: number,
 ): Promise<SparkyExercise | null> {
   const key = name.toLowerCase();
   if (cache.has(key)) return cache.get(key)!;
@@ -53,7 +54,7 @@ async function resolveExercise(
   let exercise = await sparky.searchExercise(name);
   if (!exercise) {
     try {
-      exercise = await sparky.createExercise(name, category);
+      exercise = await sparky.createExercise(name, category, wgerExerciseId);
     } catch (err) {
       console.error(`[wger→sparky] failed to create exercise "${name}":`, sanitize(err));
       cache.set(key, null);
@@ -116,6 +117,7 @@ async function syncWorkouts(
             exerciseInfo.name,
             exerciseInfo.category,
             exerciseCache,
+            exerciseInfo.id,
           );
           if (!sparkyExercise) {
             console.warn(`[wger→sparky] could not resolve Sparky exercise for "${exerciseInfo.name}", skipping log ${log.id}`);

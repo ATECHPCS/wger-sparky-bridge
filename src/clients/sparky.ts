@@ -127,7 +127,9 @@ export class SparkyClient {
     return exact ?? results[0];
   }
 
-  async createExercise(name: string, category: string): Promise<SparkyExercise> {
+  // Sparky >= 1.6 inserts exerciseData.source verbatim into a NOT NULL
+  // column (older versions defaulted it), so tag bridge-created exercises.
+  async createExercise(name: string, category: string, wgerExerciseId?: number): Promise<SparkyExercise> {
     const FormData = (await import('form-data')).default;
     const form = new FormData();
     form.append(
@@ -135,6 +137,9 @@ export class SparkyClient {
       JSON.stringify({
         name,
         category,
+        source: 'wger',
+        source_id: wgerExerciseId !== undefined ? String(wgerExerciseId) : null,
+        is_custom: true,
         equipment: [],
         muscle_groups: [],
         description: '',
