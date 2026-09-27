@@ -130,7 +130,7 @@ async function syncWorkouts(
             exercise_id: sparkyExercise.id,
             entry_date: session.datetime_start.slice(0, 10), // local YYYY-MM-DD
             sets: log.repetitions !== null || weight !== null
-              ? [{ reps: log.repetitions ?? undefined, weight: weight ?? undefined }]
+              ? [{ set_number: 1, set_type: 'Working Set', reps: log.repetitions ?? undefined, weight: weight ?? undefined }]
               : undefined,
             notes: session.notes || undefined,
           });
