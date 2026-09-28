@@ -6,6 +6,7 @@ import healthRouter from './routes/health.js';
 import statusRouter from './routes/status.js';
 import { createTriggerRouter } from './routes/trigger.js';
 import { createDigestRouter } from './routes/digest.js';
+import { requireApiKey } from './auth.js';
 
 function requireEnv(name: string): string {
   const val = process.env[name];
@@ -37,7 +38,11 @@ const sparky = new SparkyClient(SPARKY_URL, SPARKY_API_KEY);
 
 const app = express();
 app.use(express.json());
-app.use(healthRouter);
+app.use(healthRouter); // unauthenticated: container healthcheck
+app.use(requireApiKey(process.env.BRIDGE_API_KEY));
+if (!process.env.BRIDGE_API_KEY) {
+  console.warn('[server] BRIDGE_API_KEY unset: /sync/* and /digest/* will refuse all requests');
+}
 app.use(statusRouter);
 app.use(createTriggerRouter(wger, sparky));
 app.use(createDigestRouter(wger));

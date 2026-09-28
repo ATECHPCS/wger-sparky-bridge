@@ -19,6 +19,8 @@ services:
       WGER_API_TOKEN: ${WGER_API_TOKEN}
       SPARKY_URL: http://sparkyfitness-server:3010
       SPARKY_API_KEY: ${SPARKY_API_KEY}
+      # Required X-API-Key for /sync/*, /digest/* (everything but /health).
+      BRIDGE_API_KEY: ${BRIDGE_API_KEY}
       SYNC_CRON: "0 * * * *"
       # Only push these Sparky measurement categories into wger (keep Garmin/Apple noise out).
       # Sparky/Apple Health weight is kg; wger profile is lb -> convert on sync.
