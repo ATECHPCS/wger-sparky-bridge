@@ -1,5 +1,5 @@
 import { WgerClient, WgerMeasurementCategory } from '../clients/wger.js';
-import { SparkyClient } from '../clients/sparky.js';
+import { SparkyClient, SparkyCheckIn } from '../clients/sparky.js';
 import { FailTracker, newFailTracker, noteFailure, noteSoftFailure, noteSuccess } from './failures.js';
 import { checkWeight } from './weight-guard.js';
 import { isWeightQuarantined, quarantineWeight } from '../db/state.js';
@@ -37,6 +37,17 @@ const MEASUREMENT_ALLOWLIST = new Set(
     .filter(Boolean),
 );
 
+// Sparky stores body fat as the native check-in field body_fat_percentage, NOT
+// as a custom category, so the custom-measurement loop never sees it. It is
+// pushed from the check-ins into this wger measurement category instead.
+const BODY_FAT_CATEGORY_NAME = 'Body fat';
+const BODY_FAT_CATEGORY_NAMES = new Set(['body fat', 'bodyfat', 'body fat percentage', 'body_fat_percentage']);
+
+// Apple Health delivers a check-in to Sparky hours or days after its
+// entry_date, by which time the watermark has already passed that date. Always
+// re-read this many trailing days of check-ins (upserts are check-then-write).
+const CHECKIN_LOOKBACK_DAYS = Number(process.env.CHECKIN_LOOKBACK_DAYS ?? 7);
+
 function safeNumber(value: unknown, label: string): number | null {
   const n = Number(value);
   if (!Number.isFinite(n)) {
@@ -57,10 +68,15 @@ export async function sparkyToWger(
 
   const sinceStr = since.toISOString().slice(0, 10);
   const todayStr = new Date().toISOString().slice(0, 10);
+  const lookbackStr = new Date(Date.now() - CHECKIN_LOOKBACK_DAYS * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+  const checkInSinceStr = lookbackStr < sinceStr ? lookbackStr : sinceStr;
 
   // Push weight check-ins from Sparky → wger (Sparky is master)
+  let checkIns: SparkyCheckIn[] = [];
   try {
-    const checkIns = (await sparky.getCheckInsRange(sinceStr, todayStr)).sort((a, b) =>
+    checkIns = (await sparky.getCheckInsRange(checkInSinceStr, todayStr)).sort((a, b) =>
       a.entry_date.localeCompare(b.entry_date),
     );
 
@@ -116,6 +132,40 @@ export async function sparkyToWger(
     }
   } catch (err) {
     noteFailure(result, 's2w:fetch:checkins', sinceStr, err);
+  }
+
+  // Push body fat from the same check-ins into the wger "Body fat" category
+  if (MEASUREMENT_ALLOWLIST.size === 0 || MEASUREMENT_ALLOWLIST.has(categoryKey(BODY_FAT_CATEGORY_NAME))) {
+    const bodyFatCheckIns = checkIns.filter(
+      (c) => c.body_fat_percentage !== undefined && c.body_fat_percentage !== null,
+    );
+    if (bodyFatCheckIns.length > 0) {
+      try {
+        const wgerCategories = await wger.getMeasurementCategories();
+        const categoryId =
+          wgerCategories.find((c) => BODY_FAT_CATEGORY_NAMES.has(categoryKey(c.name)))?.id ??
+          (await wger.createMeasurementCategory(BODY_FAT_CATEGORY_NAME, '%')).id;
+
+        for (const checkIn of bodyFatCheckIns) {
+          const value = safeNumber(checkIn.body_fat_percentage, `body fat ${checkIn.entry_date}`);
+          if (value === null) continue; // non-numeric -> skip, not an error
+          if (value <= 0 || value >= 100) {
+            console.warn(`[sparky→wger] body fat ${checkIn.entry_date}=${value} out of range, skipping`);
+            continue;
+          }
+          const key = `s2w:meas:${BODY_FAT_CATEGORY_NAME}:${checkIn.entry_date}`;
+          try {
+            await wger.upsertMeasurement(categoryId, checkIn.entry_date, value);
+            result.measurements++;
+            noteSuccess(key);
+          } catch (err) {
+            noteFailure(result, key, checkIn.entry_date, err);
+          }
+        }
+      } catch (err) {
+        noteSoftFailure(result, `s2w:cat:${BODY_FAT_CATEGORY_NAME}`, err);
+      }
+    }
   }
 
   // Push custom measurements from Sparky → wger
